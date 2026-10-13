@@ -1,0 +1,8 @@
+# Python 3.10 or newer. The window uses tkinter, which comes with Python on Windows.
+numpy<2
+opencv-python
+pillow
+onnxruntime
+openvino
+# Only needed to run the TFLite models inside this same Python (otherwise they run in a helper process, see README.md):
+# tensorflow==2.15.1

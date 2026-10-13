@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Anything the program records or exports: annotated videos, comparison tables
+outputs/
+model_comparison*.csv
+
+# Your own test videos and camera recordings (the small demo clip in sample_video/ is kept)
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.webm
+*.mp4
+!sample_video/demo.mp4
+
+# Environments, editor and system files
+.venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

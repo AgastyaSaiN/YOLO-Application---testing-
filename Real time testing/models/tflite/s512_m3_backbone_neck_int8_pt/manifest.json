@@ -1,0 +1,9 @@
+{
+  "design": "s512_m3_backbone_neck_int8_pt",
+  "stages": [
+    "stage1.tflite",
+    "stage2.tflite"
+  ],
+  "note": "backbone+neck INT8 | head FP32",
+  "size_mb": 2.556776
+}
