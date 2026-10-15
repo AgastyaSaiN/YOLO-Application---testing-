@@ -1,0 +1,8 @@
+{
+  "design": "m0_fp32",
+  "stages": [
+    "stage1.tflite"
+  ],
+  "note": "full float32",
+  "size_mb": 7.934916
+}

@@ -92,7 +92,7 @@ Reading the comparison: a faster model with fewer **Dets** than the others may b
 
 ## 3. The models
 
-The `models/` folder contains the latest models, 19 in total, and `models/catalog.json` is the list the program reads. **`MODELS.md` describes each model** (accuracy, size, benchmark speed) and explains the naming. In short:
+The `models/` folder contains the latest models, 22 in total, and `models/catalog.json` is the list the program reads. **`MODELS.md` describes each model** (accuracy, size, benchmark speed) and explains the naming. In short:
 
 | Part of the name | Meaning |
 |---|---|
@@ -110,7 +110,7 @@ models/
 ├── catalog.json        the list the program reads (name, runtime, file, input size, accuracy, speed)
 ├── onnxruntime/        8 .onnx files (one file per model)
 ├── openvino/           3 models, each a .xml (graph) + .bin (weights) pair
-└── tflite/             7 folders, each a model made of several .tflite stage files + manifest.json
+└── tflite/             10 folders, each holding one .tflite file + manifest.json
 ```
 
 ### Runtimes
@@ -119,23 +119,15 @@ models/
 |---|---|---|
 | ONNX Runtime | one `.onnx` file | `onnxruntime` |
 | OpenVINO | `.xml` + `.bin` (keep them together) | `openvino` |
-| TFLite | a folder of stage files | TensorFlow (see below) |
+| TFLite | a folder with one `.tflite` file | `ai-edge-litert` (see below) |
 
 All run on the CPU with 4 threads. The OpenVINO entry "FP32 baseline - 640 px (run in OpenVINO)" is the same ONNX file as the ONNX Runtime baseline, run by OpenVINO instead.
 
 ### TFLite models
 
-TFLite needs TensorFlow, which is a large package and is not in `requirements.txt` by default. The program handles this in one of two ways:
+Each TFLite model is one `.tflite` file in its own folder (with a small `manifest.json`). They run with **LiteRT** (`pip install ai-edge-litert`, listed in `requirements.txt`), Google's current TFLite runtime, which runs INT8 models noticeably faster than the interpreter inside TensorFlow 2.15 (the same files run about 1.4 to 1.7 times faster; see the benchmark report). TensorFlow itself is not needed.
 
-1. **TensorFlow is installed in the same Python as the program** (`pip install tensorflow==2.15.1`): TFLite models run directly.
-2. **Otherwise**, the program starts a small helper process (`tflite_worker.py`) with the Python of the benchmark project, `..\Day 2\.venv\Scripts\python.exe`, which has TensorFlow, and sends each frame to it. Keep the `Day 2` folder next to this one, or set the environment variable `TFLITE_PYTHON` to the full path of any Python that has TensorFlow:
-
-   ```
-   set TFLITE_PYTHON=C:\path\to\python.exe
-   python app.py
-   ```
-
-If neither is available, selecting a TFLite model shows a message in the status line and the model is skipped. Because each frame travels to the helper and back, TFLite times in this program are a little higher than in the benchmark.
+The two models marked **integer input/output** take and give 8-bit integers, as integer-only accelerators (NPUs) usually need. The program turns the picture into 8-bit integers directly with a lookup table, so they run at about the same speed as the others.
 
 ---
 
@@ -153,7 +145,8 @@ Some models give box positions in pixels and some as fractions of the picture (t
 ## 5. Using your own video, or adding a model
 
 - **Your own video:** press **Browse...** and choose it. Any file OpenCV can read works.
-- **Another model of the same kind:** copy its file(s) into `models/` and add one entry to `models/catalog.json`:
+- **Another model of the same kind, quickest way:** press **Add model file...** under the model list and choose a `.tflite`, `.onnx` or `.xml` file (for TFLite the `.tflite` file itself). The program reads the input size from the model and works out whether its boxes are in pixels or fractions of the picture by looking at what it outputs for a grey picture; the model is added to the list for this session and selected. It must be a YOLOv5-style detector with a fixed square input and rows of 85 values. Models added this way show no accuracy or benchmark figures.
+- **To keep a model in the list permanently**, copy its file(s) into `models/` and add one entry to `models/catalog.json`:
 
   ```json
   {"id": "my_model", "group": "Mine", "runtime": "onnxruntime", "path": "onnxruntime/my_model.onnx",
@@ -172,7 +165,7 @@ Some models give box positions in pixels and some as fractions of the picture (t
 |---|---|
 | "Could not open the webcam" | Change the number next to Webcam (0, 1, 2), close other programs that use the camera (video calls, camera apps), check the Windows camera privacy setting for desktop apps. |
 | Webcam shows the picture but nothing is detected | Lower **Confidence**; make sure the scene has COCO objects (people, cups, chairs, laptops...); try the FP32 or an M2 model; the accuracy column shows which are the most accurate. |
-| A TFLite model is skipped | See "TFLite models" above: TensorFlow or the `Day 2` folder is missing. |
+| A TFLite model is skipped | LiteRT is not installed in this Python: `pip install ai-edge-litert`. |
 | An OpenVINO model fails to load | The `.xml` and `.bin` files must be in the same folder with the same name. |
 | It is slow | Choose a 512 px model (instead of the 640 px FP32 one) or an OpenVINO model; raise **Every Nth frame** for videos; close other heavy programs. Speed depends on your CPU. |
 | `No module named ...` | `pip install -r requirements.txt`. The program needs `numpy` below version 2 together with the OpenCV and OpenVINO versions in the file; if you see NumPy errors, `pip install "numpy<2"`. |

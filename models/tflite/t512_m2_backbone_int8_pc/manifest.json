@@ -1,0 +1,8 @@
+{
+  "design": "m2_backbone_int8_pc",
+  "stages": [
+    "stage1.tflite"
+  ],
+  "note": "single-file m2_backbone_int8, per-channel",
+  "size_mb": 4.734096
+}

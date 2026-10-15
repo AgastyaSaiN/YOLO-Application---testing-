@@ -4,8 +4,6 @@
     dets, ms = model.detect(frame_bgr, conf=0.25, iou=0.45)
     dets: array of [x1, y1, x2, y2, confidence, class_id] in the frame's pixel coordinates; ms = {"pre", "infer", "post"} in milliseconds.
 """
-import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -63,10 +61,14 @@ class Model:
         self.path = Path(base_dir) / "models" / entry["path"]
         self._load()
 
+    def _prepare(self, img_bgr):
+        """The letterboxed 8-bit picture as the network input: float32, RGB, 0-1, NCHW."""
+        return np.ascontiguousarray(img_bgr[:, :, ::-1].transpose(2, 0, 1)[None], dtype=np.float32) / 255.0
+
     def detect(self, frame_bgr, conf=0.25, iou=0.45):
         t0 = time.perf_counter()
         img, r, pad = letterbox(frame_bgr, self.size)
-        x = np.ascontiguousarray(img[:, :, ::-1].transpose(2, 0, 1)[None], dtype=np.float32) / 255.0
+        x = self._prepare(img)
         t1 = time.perf_counter()
         pred = self._run(x)
         t2 = time.perf_counter()
@@ -100,55 +102,72 @@ class OpenVinoModel(Model):
 
 
 class TFLiteModel(Model):
-    """A TFLite model is a folder of stage files. TensorFlow is only installed in the 'Day 2' environment, so if this Python has no
-    TensorFlow, the stages are run by a small helper process (tflite_worker.py) started with that environment's Python."""
+    """A TFLite model (a .tflite file, or a folder holding one), run with LiteRT. Integer-input models get the picture as 8-bit integers directly."""
 
     def _load(self):
-        self.proc = None
-        try:
-            os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-            import tensorflow  # noqa: F401
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from tflite_worker import Pipeline
-            self.pipe = Pipeline(self.path, THREADS)
-        except ImportError:
-            py = os.environ.get("TFLITE_PYTHON") or str(Path(__file__).resolve().parent.parent / "Day 2" / ".venv" / "Scripts" / "python.exe")
-            if not Path(py).exists():
-                raise RuntimeError("TFLite models need TensorFlow. Install it (pip install tensorflow==2.15.1) or set TFLITE_PYTHON to a Python that has it (see README).")
-            self.pipe = None
-            env = dict(os.environ, TF_CPP_MIN_LOG_LEVEL="3")
-            self.proc = subprocess.Popen([py, str(Path(__file__).resolve().parent / "tflite_worker.py"), str(self.path), str(self.size), str(THREADS)],
-                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
-            if self.proc.stdout.read(5) != b"READY":
-                raise RuntimeError("The TFLite helper process failed to start.")
+        from tflite_runner import Pipeline
+        self.pipe = Pipeline(self.path, THREADS)
+        d = self.pipe.stages[0][1][0]
+        self.lut = None
+        if d["dtype"] != np.float32:                  # integer-input model: a 256-entry table turns the 8-bit picture straight into the model's integer input
+            scale, zero = d["quantization"]
+            info = np.iinfo(d["dtype"])
+            self.lut = np.clip(np.round(np.arange(256) / 255.0 / scale) + zero, info.min, info.max).astype(d["dtype"])
+
+    def _prepare(self, img_bgr):
+        if self.lut is not None:
+            return np.ascontiguousarray(self.lut[img_bgr[:, :, ::-1]][None])          # 1 x H x W x 3, integer
+        return super()._prepare(img_bgr)
 
     def _run(self, x):
-        if self.pipe is not None:
-            return self.pipe(x)
-        self.proc.stdin.write(np.ascontiguousarray(x, dtype=np.float32).tobytes())
-        self.proc.stdin.flush()
-        n = int.from_bytes(self.proc.stdout.read(4), "little")
-        buf = b""
-        while len(buf) < n:
-            chunk = self.proc.stdout.read(n - len(buf))
-            if not chunk:
-                raise RuntimeError("The TFLite helper process stopped.")
-            buf += chunk
-        return np.frombuffer(buf, np.float32).reshape(-1, 85)
-
-    def close(self):
-        if self.proc:
-            try:
-                self.proc.stdin.close()
-                self.proc.wait(timeout=3)
-            except Exception:
-                self.proc.kill()
-            self.proc = None
+        return self.pipe(x)
 
 
 def load_model(entry, base_dir):
     cls = {"onnxruntime": OnnxModel, "openvino": OpenVinoModel, "tflite": TFLiteModel}[entry["runtime"]]
     return cls(entry, base_dir)
+
+
+def entry_from_file(path):
+    """Describe a model file the user picked (.tflite, .onnx or .xml) so it can be run like the listed models: runtime from the extension,
+    input size from the model's input shape, and whether its boxes are in pixels or 0-1 by looking at what it outputs for a plain grey picture."""
+    path = Path(path).resolve()
+    ext = path.suffix.lower()
+    if ext == ".tflite":
+        runtime = "tflite"
+    elif ext == ".onnx":
+        runtime = "onnxruntime"
+    elif ext == ".xml":
+        runtime = "openvino"
+    else:
+        raise ValueError("Choose a .tflite, .onnx or .xml file.")
+    name = path.parent.name if path.stem == "stage1" else path.stem            # a .tflite file named stage1 belongs to the model folder it is in
+    entry = {"id": name, "group": "Added by you", "runtime": runtime, "path": str(path), "label": name, "input_size": 640, "box_scale": 1.0,
+             "note": f"Model file you added: {path.name}", "mAP50_95": None, "retained_pct": None, "mAP50": None,
+             "file_mb": round(path.stat().st_size / 1e6, 2), "bench_ms": None, "bench_mem_mb": None}
+    if runtime == "onnxruntime":
+        import onnxruntime as ort
+        shape = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"]).get_inputs()[0].shape          # [1, 3, H, W]
+    elif runtime == "openvino":
+        import openvino as ov
+        shape = list(ov.Core().read_model(str(path)).input(0).shape)
+    else:
+        from tflite_runner import Pipeline
+        h, w = Pipeline(path, 1).stages[0][1][0]["shape"][1:3]                                                       # NHWC
+        shape = [1, 3, int(h), int(w)]
+    if not all(isinstance(v, int) for v in shape[2:]) or shape[2] != shape[3]:
+        raise ValueError(f"The model needs a fixed square input; this one has input shape {shape}.")
+    entry["input_size"] = int(shape[2])
+    m = load_model(entry, ".")
+    try:
+        grey = np.full((entry["input_size"], entry["input_size"], 3), 114, np.uint8)
+        pred = np.asarray(m._run(m._prepare(grey))).reshape(-1, 85)
+        if pred.shape[1] != 85:
+            raise ValueError("This does not look like a YOLOv5 detector (it should output rows of 85 values).")
+        entry["box_scale"] = 1.0 if float(pred[:, 0].max()) > 2.0 else float(entry["input_size"])        # x positions up to the picture size mean pixels, up to 1 mean fractions
+    finally:
+        m.close()
+    return entry
 
 
 def draw(frame, dets, thickness=2):

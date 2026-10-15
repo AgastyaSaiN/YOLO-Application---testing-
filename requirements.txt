@@ -4,5 +4,4 @@ opencv-python
 pillow
 onnxruntime
 openvino
-# Only needed to run the TFLite models inside this same Python (otherwise they run in a helper process, see README.md):
-# tensorflow==2.15.1
+ai-edge-litert            # runs the TFLite models

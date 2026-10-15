@@ -1,0 +1,8 @@
+{
+  "design": "m2_backbone_int8_pt",
+  "stages": [
+    "stage1.tflite"
+  ],
+  "note": "single-file m2_backbone_int8, per-tensor",
+  "size_mb": 4.671528
+}

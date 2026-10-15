@@ -152,6 +152,7 @@ def main_window():
             self.tree.pack(side="left", fill="y"); sb.pack(side="left", fill="y")
             self.tree.bind("<<TreeviewSelect>>", self.on_select)
             self.fill_models()
+            ttk.Button(left, text="Add model file...  (.tflite / .onnx / .xml)", command=self.add_model).pack(fill="x", pady=(6, 0))
             # centre: video
             mid = ttk.Frame(body, padding=6)
             mid.pack(side="left", fill="both", expand=True)
@@ -193,6 +194,27 @@ def main_window():
             self.shown = [e for e in CATALOG if keep(e)]
             for i, e in enumerate(self.shown):
                 self.tree.insert("", "end", iid=str(i), text=e["name"], values=("-" if e["mAP50_95"] is None else f"{e['mAP50_95']:.3f}", "-" if e["bench_ms"] is None else f"{e['bench_ms']:.0f}"))
+
+        def add_model(self):
+            """Let the user add any YOLOv5 model file; its input size and box format are detected from the file."""
+            p = filedialog.askopenfilename(title="Choose a model file", filetypes=[("Model", "*.tflite *.onnx *.xml"), ("All files", "*.*")], initialdir=HERE / "models")
+            if not p:
+                return
+            try:
+                self.status_text = f"Checking {Path(p).name} ..."
+                self.update_idletasks()
+                entry = engines.entry_from_file(p)
+            except Exception as ex:
+                messagebox.showerror("Could not add the model", str(ex))
+                self.status_text = "The model was not added."
+                return
+            entry["name"] = f"[{SHORT[entry['runtime']]}] {entry['label']}"
+            CATALOG.append(entry)
+            self.filter.current(0)
+            self.fill_models()
+            idx = str(len(self.shown) - 1)
+            self.tree.selection_set(idx); self.tree.see(idx)
+            self.status_text = f"Added {entry['name']} (input {entry['input_size']} px, boxes {'in pixels' if entry['box_scale'] == 1.0 else 'as fractions of the picture'}). It is selected: press Start."
 
         def refresh_cfg(self):
             """Copy the settings into a plain dict: the worker thread reads this, never the Tk variables."""
@@ -377,7 +399,7 @@ def main_window():
 # ----------------------------------------------------------------------------------- command line check
 def selftest():
     video = HERE / "sample_video" / "demo.mp4"
-    pick = [e for e in CATALOG if e["label"].startswith(("FP32 baseline | 640", "M3 per-channel | 512", "M3 | plain network | 512", "TFLite M3, per-channel | 512"))]
+    pick = [e for e in CATALOG if e["label"].startswith(("FP32 baseline | 640", "M3 per-channel | 512", "M3 | OpenVINO INT8 | 512", "TFLite M3, per-channel | 512"))]
     print(f"{len(pick)} models on {video.name} (every 5th frame)")
     print(f"{'model':58s} {'frames':>6s} {'ms/img':>7s} {'fps':>6s} {'dets':>5s}")
     for e in pick:

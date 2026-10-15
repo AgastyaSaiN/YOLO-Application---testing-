@@ -1,0 +1,8 @@
+{
+  "design": "m1_all_int8_pt",
+  "stages": [
+    "stage1.tflite"
+  ],
+  "note": "single-file m1_all_int8, per-tensor",
+  "size_mb": 2.0222
+}
